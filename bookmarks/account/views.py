@@ -1,13 +1,16 @@
+from django.http import HttpResponse
+from django.shortcuts import render
+from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
 from django.contrib import messages
-from django.http import HttpResponse, JsonResponse
+from django.contrib.auth.models import User
+from django.http import JsonResponse
 from django.views.decorators.http import require_POST
-from django.shortcuts import render, get_object_or_404
 from .forms import LoginForm, UserRegistrationForm, \
                    UserEditForm, ProfileEditForm
-from .models import Profile, Contact
+from .models import Profile
+from .models import Contact
 from actions.utils import create_action
 from actions.models import Action
 
@@ -35,14 +38,15 @@ def user_login(request):
 
 @login_required
 def dashboard(request):
-    # По умолчанию показать все действия
+    # Display all actions by default
     actions = Action.objects.exclude(user=request.user)
-    following_ids = request.user.following.values_list('id', flat=True)
+    following_ids = request.user.following.values_list('id',
+                                                       flat=True)
     if following_ids:
-        # Если пользователь подписан на других,
-        # то извлечь только их действия
+        # If user is following others, retrieve only their actions
         actions = actions.filter(user_id__in=following_ids)
-    actions = actions.select_related('user', 'user__profile')[:10]
+    actions = actions.select_related('user', 'user__profile')\
+                     .prefetch_related('target')[:10]
     return render(request,
                   'account/dashboard.html',
                   {'section': 'dashboard',
@@ -53,15 +57,14 @@ def register(request):
     if request.method == 'POST':
         user_form = UserRegistrationForm(request.POST)
         if user_form.is_valid():
-            # Создать новый объект пользователя,
-            # но пока не сохранять его
+            # Create a new user object but avoid saving it yet
             new_user = user_form.save(commit=False)
-            # Установить выбранный пароль
+            # Set the chosen password
             new_user.set_password(
                 user_form.cleaned_data['password'])
-            # Сохранить объект User
+            # Save the User object
             new_user.save()
-            # Создать профиль пользователя
+            # Create the user profile
             Profile.objects.create(user=new_user)
             create_action(new_user, 'has created an account')
             return render(request,
@@ -105,7 +108,7 @@ def user_list(request):
     users = User.objects.filter(is_active=True)
     return render(request,
                   'account/user/list.html',
-                   {'section': 'people',
+                  {'section': 'people',
                    'users': users})
 
 
@@ -136,9 +139,7 @@ def user_follow(request):
             else:
                 Contact.objects.filter(user_from=request.user,
                                        user_to=user).delete()
-            return JsonResponse({'status':'ok'})
+            return JsonResponse({'status': 'ok'})
         except User.DoesNotExist:
-            return JsonResponse({'status':'error'})
-    return JsonResponse({'status':'error'})
-
-
+            return JsonResponse({'status': 'error'})
+    return JsonResponse({'status': 'error'})
